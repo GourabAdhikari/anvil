@@ -1,8 +1,13 @@
+# Current Tasks
+
+## Phase 1
+
+- [x] Setup project structure
 - [x] Router
 - [x] Tool schemas
 - [x] CLI
 - [x] GitHub integration
-- [ ] Testing
+- [x] Testing
 
 ## Phase 6 — Voice Reliability
 
@@ -50,6 +55,18 @@
 - [x] Executor registry validation and dispatch diagnostics
 - [x] Active-venv dependency bootstrap and tool validation
 
+## Phase 12 — Production Readiness
+
+- [x] Debug and production output modes
+- [x] Voice latency instrumentation and TTS reuse
+- [x] Memory ranking, deduplication, metadata, and stats
+- [x] Tool failure recovery and repository defaults
+- [x] Startup health checks
+- [x] Chat UX and help improvements
+- [x] Reliability and regression tests
+- [x] Router memory stats command + usage coverage
+- [x] Multiline explain-error routing and memory identity guardrails
+
 ## Current Task
 
-Phase 11 complete
+Phase 12 complete

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -62,7 +63,8 @@ class MemoryStore:
             return {"success": False, "error": validation_error}
         try:
             encoded = _encode(value)
-            self._get_collection().upsert(ids=[key.strip()], documents=[encoded], metadatas=[{"type": "key_value"}])
+            metadata = {"type": "key_value", "created_at": datetime.now(timezone.utc).isoformat()}
+            self._get_collection().upsert(ids=[key.strip()], documents=[encoded], metadatas=[metadata])
         except Exception as exc:
             return {"success": False, "key": key, "error": str(exc)}
         return {"success": True, "key": key.strip(), "value": value}
@@ -89,10 +91,15 @@ class MemoryStore:
         text = statement.strip()
         memory_id = "statement_" + hashlib.sha256(text.encode("utf-8")).hexdigest()
         try:
-            self._get_collection().upsert(
+            collection = self._get_collection()
+            nearest = collection.query(query_texts=[text], n_results=1, include=["distances"])
+            distances = (nearest.get("distances") or [[]])[0]
+            if distances and distances[0] <= 0.05:
+                return {"success": True, "duplicate": True, "id": memory_id, "statement": text}
+            collection.upsert(
                 ids=[memory_id],
                 documents=[text],
-                metadatas=[{"type": "statement"}],
+                metadatas=[{"type": "statement", "created_at": datetime.now(timezone.utc).isoformat()}],
             )
         except Exception as exc:
             return {"success": False, "error": str(exc)}
@@ -108,7 +115,7 @@ class MemoryStore:
             memories = []
             for memory_id, document, metadata in zip(ids, documents, metadatas):
                 kind = (metadata or {}).get("type", "key_value")
-                memories.append({"id": memory_id, "type": kind, "value": document if kind == "statement" else _decode(document)})
+                memories.append({"id": memory_id, "type": kind, "value": document if kind == "statement" else _decode(document), "created_at": (metadata or {}).get("created_at")})
             return {"success": True, "count": len(memories), "memories": memories}
         except Exception as exc:
             return {"success": False, "error": str(exc)}
@@ -132,7 +139,7 @@ class MemoryStore:
             matches = []
             for memory_id, document, metadata, distance in zip(ids, documents, metadatas, distances):
                 kind = (metadata or {}).get("type", "key_value")
-                matches.append({"id": memory_id, "type": kind, "value": document if kind == "statement" else _decode(document), "distance": distance})
+                matches.append({"id": memory_id, "type": kind, "value": document if kind == "statement" else _decode(document), "distance": distance, "created_at": (metadata or {}).get("created_at")})
             return {"success": True, "query": query.strip(), "matches": matches}
         except Exception as exc:
             return {"success": False, "query": query.strip(), "error": str(exc)}
@@ -147,6 +154,13 @@ class MemoryStore:
             return {"success": True, "deleted": len(ids)}
         except Exception as exc:
             return {"success": False, "error": str(exc)}
+
+    def stats(self) -> dict[str, Any]:
+        """Return lightweight persistent memory statistics."""
+        listed = self.list_memories()
+        if not listed.get("success"):
+            return listed
+        return {"success": True, "total_memories": listed["count"], "storage_backend": "chromadb", "collection": self._collection_name, "collection_size": listed["count"]}
 
     def debug_state(self) -> dict[str, Any]:
         """Return stored keys and decoded values for local diagnostics."""
@@ -190,6 +204,10 @@ def clear_memories() -> dict[str, Any]:
     return _store().clear_memories()
 
 
+def stats() -> dict[str, Any]:
+    return _store().stats()
+
+
 def debug_state() -> dict[str, Any]:
     return _store().debug_state()
 
@@ -202,5 +220,6 @@ __all__ = [
     "list_memories",
     "search_memories",
     "clear_memories",
+    "stats",
     "debug_state",
 ]

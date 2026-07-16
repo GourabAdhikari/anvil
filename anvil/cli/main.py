@@ -49,18 +49,33 @@ _TOOL_DEPENDENCIES = {
     "sentence-transformers": "sentence_transformers",
     "numpy": "numpy",
     "pytest": "pytest",
+    "Coqui TTS": "TTS",
+    "faster-whisper": "faster_whisper",
 }
 
 
-def _validate_tool_dependencies() -> list[str]:
-    missing = [package for package, module in _TOOL_DEPENDENCIES.items() if importlib.util.find_spec(module) is None]
+def _health_check() -> dict[str, Any]:
+    checks = {
+        "Groq": bool(os.getenv("GROQ_API_KEY")) and importlib.util.find_spec("groq") is not None,
+        "Memory": importlib.util.find_spec("chromadb") is not None,
+        "TTS": importlib.util.find_spec("TTS") is not None,
+        "STT": importlib.util.find_spec("faster_whisper") is not None,
+        "Tools": not [package for package, module in _TOOL_DEPENDENCIES.items() if importlib.util.find_spec(module) is None],
+    }
+    missing = [name for name, available in checks.items() if not available]
+    typer.echo("Ready:")
+    for name, available in checks.items():
+        typer.echo(f"✓ {name}" if available else f"✗ {name}")
     if missing:
-        _log("dependencies_missing", force=True, packages=missing)
-    return missing
+        packages = [package for package, module in _TOOL_DEPENDENCIES.items() if importlib.util.find_spec(module) is None]
+        _log("dependencies_missing", force=True, packages=packages)
+    return {"ready": not missing, "checks": checks, "missing": missing}
 
 
 def _print_help() -> None:
     typer.echo("Commands: help, clear, exit")
+    typer.echo("Memory: memory list, memory remember <text>, memory search <query>, memory clear, memory stats")
+    typer.echo("Modes: chat, voice, health")
     typer.echo("Use chat mode to type commands or voice mode to press Enter and speak.")
 
 
@@ -178,14 +193,14 @@ def _speak_generated_response(
         _log("speech_text", text=speech_text)
         _log("speech_text_length", words=len(speech_text.split()))
     if lifecycle_events:
-        _log("speaking_started", force=True)
+        _log("speaking_started")
     tts_started = time.perf_counter()
     spoken = _speak_response(speech_text)
     tts_seconds = round(time.perf_counter() - tts_started, 3)
     if not spoken.get("success"):
         _log("error", error=spoken.get("error", "Response speech failed."))
         if lifecycle_events:
-            _log("speaking_finished", force=True, success=False)
+            _log("speaking_finished", success=False)
         return
 
     output_path = Path(spoken["output_path"])
@@ -204,23 +219,28 @@ def _speak_generated_response(
     if lifecycle_events:
         _log(
             "latency",
-            force=True,
             stt_seconds=stt_seconds,
             llm_seconds=_last_llm_seconds,
             tts_seconds=tts_seconds,
             playback_seconds=playback_seconds,
         )
-        _log("speaking_finished", force=True, success=bool(playback.get("played")), **playback)
+        _log("speaking_finished", success=bool(playback.get("played")), **playback)
+
+
+@app.command("health")
+def health_command() -> None:
+    """Check local API, memory, voice, and tool dependencies."""
+    _health_check()
 
 
 @app.command("memory")
 def memory_command(
-    action: str = typer.Argument("list", help="list, remember, search, or clear"),
+    action: str = typer.Argument("list", help="list, remember, search, clear, or stats"),
     value: str | None = typer.Argument(None, help="Statement to remember or search query"),
 ) -> None:
     """List, remember, search, or clear persistent local memories."""
     try:
-        from anvil.memory.store import clear_memories, list_memories, remember_statement, search_memories
+        from anvil.memory.store import clear_memories, list_memories, remember_statement, search_memories, stats
         if action == "list":
             result = list_memories()
         elif action == "remember" and value:
@@ -229,8 +249,10 @@ def memory_command(
             result = search_memories(value)
         elif action == "clear":
             result = clear_memories()
+        elif action == "stats":
+            result = stats()
         else:
-            result = {"success": False, "error": "Usage: memory list | memory remember <statement> | memory search <query> | memory clear"}
+            result = {"success": False, "error": "Usage: memory list | memory remember <statement> | memory search <query> | memory clear | memory stats"}
         typer.echo(json.dumps(result, indent=2, default=str))
     except Exception as exc:
         _log("error", error=str(exc))
@@ -287,7 +309,7 @@ def chat_command(
             tts.initialize()
         except Exception as exc:
             _log("error", error=str(exc))
-    _validate_tool_dependencies()
+    _health_check()
     typer.echo("Anvil chat. Type help for commands.")
     while True:
         try:
@@ -319,6 +341,7 @@ def chat_command(
 @app.command("voice")
 def voice_command() -> None:
     """Start direct voice mode; press Enter to record each command."""
+    _health_check()
     try:
         tts.initialize()
     except Exception as exc:

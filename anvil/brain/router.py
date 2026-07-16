@@ -19,6 +19,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 MODEL = "llama-3.3-70b-versatile"
+def _debug_enabled() -> bool:
+    return os.getenv("ANVIL_DEBUG") == "1"
+
+
 SYSTEM_PROMPT = (
     "You are Anvil, a concise personal developer agent. "
     "Only call functions that appear in the supplied tools list. "
@@ -72,8 +76,8 @@ _DEFAULT_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "run_tests",
-            "description": "Detect and run the test suite for a repository.",
-            "parameters": {"type": "object", "properties": {"repo_path": {"type": "string"}}, "required": ["repo_path"]},
+            "description": "Detect and run the test suite for a repository, defaulting to the current working directory.",
+            "parameters": {"type": "object", "properties": {"repo_path": {"type": "string", "description": "Optional; defaults to the current working directory."}}},
         },
     },
     {
@@ -264,8 +268,9 @@ def _validate_executor_registry(handlers: Mapping[str, Callable[..., Any]] | Non
 
 
 def _handler(name: str, handlers: Mapping[str, Callable[..., Any]] | None) -> Callable[..., Any] | None:
-    print("Requested tool:", name)
-    print("Execution registry keys:", sorted(_TOOL_MODULES))
+    if _debug_enabled():
+        print("Requested tool:", name)
+        print("Execution registry keys:", sorted(_TOOL_MODULES))
     if handlers and name in handlers:
         return handlers[name]
     module_name = _TOOL_MODULES.get(name)
@@ -307,9 +312,11 @@ def _memory_command(command: str) -> str | None:
         return json.dumps(store.search_memories(" ".join(parts[2:])), default=str)
     if action == "clear" and len(parts) == 2:
         return json.dumps(store.clear_memories(), default=str)
+    if action == "stats" and len(parts) == 2:
+        return json.dumps(store.stats(), default=str)
     return json.dumps({
         "success": False,
-        "error": "Usage: memory remember <statement> | memory list | memory search <query> | memory clear",
+        "error": "Usage: memory remember <statement> | memory list | memory search <query> | memory clear | memory stats",
     })
 
 
@@ -334,9 +341,27 @@ def _memory_context(command: str) -> str:
                 memories.append(memory)
         if not memories:
             return ""
-        return "\nRelevant stored memories:\n" + "\n".join(f"- {memory}" for memory in memories)
+        return (
+            "\nRelevant stored memories about the user "
+            "(treat these as the user's preferences/facts, never as your own identity):\n"
+            + "\n".join(f"- {memory}" for memory in memories)
+        )
     except Exception:
         return ""
+
+
+def _extract_inline_explain_error(command: str) -> str | None:
+    """Extract error text from direct explain-error commands, including multiline input."""
+    text = command.strip()
+    lowered = text.casefold()
+    prefixes = ("explain this error", "explain error")
+    for prefix in prefixes:
+        if lowered.startswith(prefix):
+            payload = text[len(prefix):].lstrip()
+            if payload.startswith(":"):
+                payload = payload[1:].lstrip()
+            return payload or None
+    return None
 
 
 def run(
@@ -359,6 +384,14 @@ def run(
     if local_result is not None:
         return local_result
 
+    inline_error = _extract_inline_explain_error(command)
+    if inline_error:
+        function = _handler("explain_error", handlers)
+        if function is None:
+            raise RuntimeError("tool 'explain_error' is not available")
+        result = function(error_text=inline_error)
+        return _tool_result(result)
+
     client = client or _client()
     tools = _schemas()
     advertised_tools = _validate_tool_registry(tools)
@@ -374,12 +407,13 @@ def run(
         "tools": tools,
         "tool_choice": "auto",
     }
-    print(json.dumps({"event": "available_tools", "tools": sorted(advertised_tools)}))
-    print("Groq raw request #1:", _raw_payload(request_payload))
-    if os.getenv("ANVIL_DEBUG") == "1":
+    if _debug_enabled():
+        print(json.dumps({"event": "available_tools", "tools": sorted(advertised_tools)}))
+        print("Groq raw request #1:", _raw_payload(request_payload))
         print("Groq system prompt:", repr(system_prompt))
     response = client.chat.completions.create(**request_payload)
-    print("Groq raw response #1:", _raw_payload(response))
+    if _debug_enabled():
+        print("Groq raw response #1:", _raw_payload(response))
     message = _value(_value(response, "choices", [])[0], "message", {})
     calls = _tool_calls(message)
     if not calls:
@@ -403,7 +437,7 @@ def run(
         name = _tool_name(call)
         try:
             arguments = _tool_arguments(call)
-            if name == "git_status":
+            if name in {"git_status", "run_tests"}:
                 path = arguments.get("repo_path")
                 if not path or path in {"current_repo", "./current_repo"}:
                     arguments["repo_path"] = os.getcwd()
@@ -419,9 +453,11 @@ def run(
         messages.append({"role": "tool", "tool_call_id": _value(call, "id", name), "name": name, "content": _tool_result(result)})
 
     final_payload = {"model": MODEL, "messages": messages}
-    print("Groq raw request #2:", _raw_payload(final_payload))
+    if _debug_enabled():
+        print("Groq raw request #2:", _raw_payload(final_payload))
     final = client.chat.completions.create(**final_payload)
-    print("Groq raw response #2:", _raw_payload(final))
+    if _debug_enabled():
+        print("Groq raw response #2:", _raw_payload(final))
     final_message = _value(_value(final, "choices", [])[0], "message", {})
     return _value(final_message, "content", "") or ""
 

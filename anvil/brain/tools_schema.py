@@ -56,11 +56,10 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "run_tests",
-            "description": "Detect and run the test suite for a repo, return pass/fail summary.",
+            "description": "Detect and run the test suite for a repo, defaulting to the current working directory.",
             "parameters": {
                 "type": "object",
-                "properties": {"repo_path": {"type": "string"}},
-                "required": ["repo_path"],
+                "properties": {"repo_path": {"type": "string", "description": "Optional; defaults to the current working directory."}},
             },
         },
     },

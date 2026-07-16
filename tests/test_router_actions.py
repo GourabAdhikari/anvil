@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 
 from anvil.brain import router
@@ -93,3 +94,14 @@ def test_commit_is_cancelled_without_confirmation():
     calls = []
     run_tool("git_commit", '{"repo_path":".","message":"unsafe"}', lambda **args: calls.append(args) or {"success": True}, confirm=lambda prompt: False)
     assert calls == []
+
+
+def test_multiline_explain_error_routes_to_tool():
+    calls = []
+    result = router.run(
+        "explain this error:\n\nModuleNotFoundError: No module named 'pip'",
+        handlers={"explain_error": lambda **args: calls.append(args) or {"success": True, "error_summary": "missing pip"}},
+    )
+    payload = json.loads(result)
+    assert calls == [{"error_text": "ModuleNotFoundError: No module named 'pip'"}]
+    assert payload["success"] is True

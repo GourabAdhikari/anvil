@@ -53,8 +53,8 @@ def initialize(model_name: str = MODEL_NAME) -> Any:
             try:
                 _synthesizer = _load_model(candidate)
                 _synthesizer_model = candidate
-                print(json.dumps({"event": "tts_model_selected", "model": candidate}), flush=True)
                 if _debug_enabled():
+                    print(json.dumps({"event": "tts_model_selected", "model": candidate}), flush=True)
                     print(json.dumps({"event": "tts_initialized", "model": candidate}), flush=True)
                 break
             except Exception as exc:

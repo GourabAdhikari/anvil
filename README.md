@@ -75,9 +75,10 @@ Create `.env` in the project root:
 
 Never commit `.env` or expose these tokens in source control.
 
-Set `ANVIL_DEBUG=1` to show Groq prompts, tool schemas, TTS cache events, and
-other internal diagnostics. By default, chat shows only user prompts, assistant
-responses, and errors.
+Set `ANVIL_DEBUG=1` to show Groq prompts, tool schemas, TTS cache events, latency,
+memory retrieval, and other internal diagnostics. By default, chat shows only
+user prompts, assistant responses, and errors. Run `python -m anvil.cli.main health`
+to check Groq, ChromaDB, TTS, STT, and tool dependencies.
 
 ### Groq startup validation
 
@@ -115,6 +116,8 @@ python -m anvil.cli.main memory list
 python -m anvil.cli.main memory remember "I prefer concise responses"
 python -m anvil.cli.main memory search "response style"
 python -m anvil.cli.main memory clear
+python -m anvil.cli.main memory stats
+python -m anvil.cli.main health
 python -m anvil.cli.main tts-test
 ```
 

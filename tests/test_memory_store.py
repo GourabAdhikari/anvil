@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from anvil.brain import router
 from anvil.memory import store as store_module
 from anvil.memory.store import MemoryStore
@@ -73,6 +75,7 @@ def test_chat_memory_interaction_and_restart():
         def create(self, **kwargs):
             system = kwargs["messages"][0]["content"]
             assert "My favorite framework is Next.js" in system
+            assert "never as your own identity" in system
             return {"choices": [{"message": {"content": "Next.js"}}]}
 
     try:
@@ -87,3 +90,24 @@ def test_chat_memory_interaction_and_restart():
     finally:
         store_module._default_store = original_store
         router._client = original_client
+
+
+def test_router_memory_stats_command():
+    client = FakeClient()
+    original_store = store_module._default_store
+    try:
+        store_module._default_store = MemoryStore(client=client)
+        assert store_module.remember_statement("Keep answers concise.")["success"]
+        result = json.loads(router.run("memory stats"))
+        assert result["success"] is True
+        assert result["total_memories"] == 1
+        assert result["storage_backend"] == "chromadb"
+        assert result["collection"] == "anvil_memory"
+    finally:
+        store_module._default_store = original_store
+
+
+def test_router_memory_command_usage_lists_stats():
+    result = json.loads(router.run("memory nonsense"))
+    assert result["success"] is False
+    assert "memory stats" in result["error"]
