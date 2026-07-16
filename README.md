@@ -17,8 +17,16 @@ and persistent local memory.
 - Tree-sitter code chunking and CPU-only Jina code embeddings
 - ChromaDB-backed key/value memory
 
-Templates, voice input, text-to-speech, and router memory integration are not
+Templates, text-to-speech integration, and router memory integration are not
 implemented in the current build.
+
+### Software wake word
+
+The development wake word is **jarvis**. The listener records short microphone
+chunks, transcribes them with the CPU-only faster-whisper integration, emits a
+transcript debug event for every chunk, and emits `wake_word_detected` when the
+transcript contains `jarvis` (case-insensitive). It requires no Picovoice
+account, access key, or `.ppn` file.
 
 ## Requirements
 

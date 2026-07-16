@@ -6,4 +6,4 @@
 
 ## Current Task
 
-Build voice/tts.py (complete)
+Build voice/wake_word.py (complete; 1s chunks with 250ms overlap)
