@@ -1,5 +1,5 @@
 # Anvil runtime dependencies (Python 3.12)
-groq
+groq  # Groq Python SDK
 python-dotenv
 typer
 PyGithub

@@ -17,8 +17,8 @@ and persistent local memory.
 - Tree-sitter code chunking and CPU-only Jina code embeddings
 - ChromaDB-backed key/value memory
 
-Templates, text-to-speech integration, and router memory integration are not
-implemented in the current build.
+Templates and router memory integration are not implemented in the current
+build. Voice, direct chat, and text-command interfaces are available.
 
 ### Software wake word
 
@@ -50,6 +50,8 @@ python3.12 -m venv .venv
 source .venv/bin/activate        # Windows: .venv\\Scripts\\activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+# Or install the Groq dependency directly:
+python -m pip install groq
 
 cp .env.example .env
 ```
@@ -70,6 +72,21 @@ Create `.env` in the project root:
 
 Never commit `.env` or expose these tokens in source control.
 
+### Groq startup validation
+
+The router fails clearly at startup when either requirement is missing:
+
+- `The groq package is not installed`
+- `GROQ_API_KEY is not configured`
+
+Install the SDK with:
+
+```bash
+python -m pip install groq
+```
+
+Then set `GROQ_API_KEY` in `.env` before running commands.
+
 ## Usage
 
 Run the CLI directly from the project checkout:
@@ -83,7 +100,29 @@ python -m anvil.cli.main run "run tests in /path/to/repository"
 python -m anvil.cli.main run "list open pull requests for octocat/hello-world"
 python -m anvil.cli.main run "explain this error: ModuleNotFoundError: No module named requests"
 python -m anvil.cli.main run "find duplicate code in /path/to/repo-a and /path/to/repo-b"
+python -m anvil.cli.main chat
+python -m anvil.cli.main chat --tts
+python -m anvil.cli.main voice
 ```
+
+### Chat mode
+
+```text
+You > explain ModuleNotFoundError no module named pandas
+Anvil >
+pandas is not installed in the active environment. Install it with pip and retry.
+```
+
+Chat commands:
+
+- `help` — show available interactive commands
+- `clear` — clear the terminal
+- `exit` — leave chat or voice mode
+
+Chat and voice commands use the same router, tool dispatch, and existing memory
+module. `chat --tts` additionally synthesizes and attempts to play each response.
+Voice mode has no wake-word dependency: press Enter, speak a command, and Anvil
+records, transcribes, routes, and speaks the response.
 
 The `run` command requires a configured `GROQ_API_KEY`. The router selects and
 executes tools based on the natural-language command. Tool failures are returned

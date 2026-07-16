@@ -1,4 +1,4 @@
-"""Software "jarvis" wake-word detection using microphone chunks and faster-whisper."""
+"""CPU-only STT-based wake-word detection for the Jarvis wake word."""
 
 from __future__ import annotations
 
@@ -74,10 +74,12 @@ def listen(
     while not stop_event.is_set():
         audio_path: Path | None = None
         try:
-            fresh_audio = source(sample_rate, chunk_frames if first_chunk else capture_frames)
+            frames = chunk_frames if first_chunk else capture_frames
+            fresh_audio = source(sample_rate, frames)
             first_chunk = False
             if not isinstance(fresh_audio, bytes) or not fresh_audio:
                 raise RuntimeError("audio source returned no audio data")
+
             audio = previous_tail + fresh_audio
             previous_tail = audio[-overlap_bytes:] if overlap_bytes else b""
             audio_path = _write_wav(audio, sample_rate)
@@ -85,6 +87,7 @@ def listen(
             if not result.get("success"):
                 yield _error(result.get("error", "speech transcription failed"))
                 continue
+
             transcript = str(result.get("text", "")).strip()
             yield {"event": "transcript", "text": transcript}
             if WAKE_WORD in transcript.casefold():

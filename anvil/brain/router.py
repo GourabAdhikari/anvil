@@ -18,6 +18,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 MODEL = "llama-3.3-70b-versatile"
+SYSTEM_PROMPT = (
+    "You are Anvil, a concise personal developer agent. "
+    "Only call functions that appear in the supplied tools list. "
+    "If no supplied tool applies, answer the user directly."
+)
 
 # Kept here as a fallback while the schemas module is being built.  If that
 # module exports TOOL_SCHEMAS, its value is used instead.
@@ -121,6 +126,35 @@ def _schemas() -> list[dict[str, Any]]:
     return _DEFAULT_TOOL_SCHEMAS
 
 
+def _schema_names(tools: list[dict[str, Any]]) -> set[str]:
+    names: set[str] = set()
+    for tool in tools:
+        function = tool.get("function") if isinstance(tool, Mapping) else None
+        name = function.get("name") if isinstance(function, Mapping) else None
+        if not isinstance(name, str) or not name:
+            raise RuntimeError("Invalid tool schema: every function tool must have a name")
+        if name in names:
+            raise RuntimeError(f"Duplicate tool schema: {name}")
+        names.add(name)
+    return names
+
+
+def _validate_tool_registry(tools: list[dict[str, Any]]) -> set[str]:
+    """Ensure advertised schemas and local dispatch registrations agree."""
+    advertised = _schema_names(tools)
+    registered = set(_TOOL_MODULES)
+    missing_handlers = advertised - registered
+    missing_schemas = registered - advertised
+    if missing_handlers or missing_schemas:
+        details = []
+        if missing_handlers:
+            details.append(f"advertised without handlers: {sorted(missing_handlers)}")
+        if missing_schemas:
+            details.append(f"registered without schemas: {sorted(missing_schemas)}")
+        raise RuntimeError("Tool registry mismatch: " + "; ".join(details))
+    return advertised
+
+
 def _client() -> Any:
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
@@ -206,15 +240,28 @@ def run(command: str, *, client: Any = None, handlers: Mapping[str, Callable[...
         raise ValueError("command must be a non-empty string")
 
     client = client or _client()
+    tools = _schemas()
+    advertised_tools = _validate_tool_registry(tools)
     messages: list[dict[str, Any]] = [
-        {"role": "system", "content": "You are Anvil, a concise personal developer agent."},
+        {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": command.strip()},
     ]
-    response = client.chat.completions.create(model=MODEL, messages=messages, tools=_schemas(), tool_choice="auto")
+    print("Groq system prompt:", repr(SYSTEM_PROMPT))
+    print("Groq tools:", json.dumps(tools, sort_keys=True))
+    response = client.chat.completions.create(model=MODEL, messages=messages, tools=tools, tool_choice="auto")
     message = _value(_value(response, "choices", [])[0], "message", {})
     calls = _tool_calls(message)
     if not calls:
         return _value(message, "content", "") or ""
+
+    unknown_tools = sorted({_tool_name(call) for call in calls} - advertised_tools)
+    if unknown_tools:
+        raise RuntimeError(
+            "Model requested unavailable tool(s): "
+            + ", ".join(unknown_tools)
+            + ". Available tools: "
+            + ", ".join(sorted(advertised_tools))
+        )
 
     messages.append({
         "role": "assistant",
