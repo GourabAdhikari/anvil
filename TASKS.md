@@ -1,4 +1,4 @@
-x# Current Tasks
+# Current Tasks
 
 ## Phase 1
 
@@ -11,4 +11,4 @@ x# Current Tasks
 
 ## Current Task
 
-Build router.py (complete)
+Build tools_schema.py
