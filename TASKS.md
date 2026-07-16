@@ -4,11 +4,11 @@
 
 - [ ] Setup project structure
 - [x] Router
-- [ ] Tool schemas
+- [x] Tool schemas
 - [ ] CLI
 - [ ] GitHub integration
 - [ ] Testing
 
 ## Current Task
 
-Build tools_schema.py
+Build tools_schema.py (complete)
