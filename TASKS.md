@@ -6,4 +6,4 @@
 
 ## Current Task
 
-Build memory/store.py (complete)
+Build voice/stt.py (complete)
