@@ -67,6 +67,19 @@
 - [x] Router memory stats command + usage coverage
 - [x] Multiline explain-error routing and memory identity guardrails
 
+## Phase 13A — Autonomous Multi-Step Workflow Agent
+
+- [x] Workflow planner layer
+- [x] Sequential multi-tool execution engine
+- [x] Failure recovery and workflow summaries
+- [x] Confirmation gates in workflows
+- [x] Memory-aware workflow planning
+- [x] Current-directory defaults for repo tools
+- [x] Workflow history storage and `workflow history` command
+- [x] Workflow debug events
+- [x] Workflow validation tests
+- [x] Pending-workflow confirmation resume and unregistered-tool rejection
+
 ## Current Task
 
-Phase 12 complete
+Phase 13A complete

@@ -10,8 +10,10 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import re
 import shlex
 from collections.abc import Callable, Mapping
+from datetime import datetime, timezone
 from typing import Any
 
 from dotenv import load_dotenv
@@ -133,6 +135,9 @@ _TOOL_MODULES = {
     "explain_error": "anvil.tools.devops.error_explainer",
     "find_duplicates": "anvil.tools.devops.duplicate_detector",
 }
+_WORKFLOW_HISTORY_KEY = "workflow_history"
+_WORKFLOW_HISTORY_LIMIT = 5
+_PENDING_WORKFLOW_KEY = "pending_workflow"
 
 
 def _schemas() -> list[dict[str, Any]]:
@@ -251,6 +256,12 @@ def _tool_result(value: Any) -> str:
         return str(value)
 
 
+def _emit_debug(event: str, **details: Any) -> None:
+    if not _debug_enabled():
+        return
+    print(json.dumps({"event": event, **details}, default=str))
+
+
 def _validate_executor_registry(handlers: Mapping[str, Callable[..., Any]] | None) -> None:
     """Validate that every registered tool resolves to an executable function."""
     missing: list[str] = []
@@ -290,6 +301,12 @@ def _confirm_tool(name: str, arguments: dict[str, Any], confirm: Callable[[str],
         return input(prompt).strip().casefold() in {"y", "yes"}
     except (EOFError, KeyboardInterrupt):
         return False
+
+
+def _normalize_repo_path(arguments: dict[str, Any], *, key: str = "repo_path") -> None:
+    path = arguments.get(key)
+    if not path or path in {"current_repo", "./current_repo"}:
+        arguments[key] = os.getcwd()
 
 
 def _memory_command(command: str) -> str | None:
@@ -364,6 +381,300 @@ def _extract_inline_explain_error(command: str) -> str | None:
     return None
 
 
+def _workflow_history_command(command: str) -> str | None:
+    if command.strip().casefold() != "workflow history":
+        return None
+    history = _workflow_history()
+    if not history:
+        return "No workflow history yet."
+    lines = ["Recent workflows:"]
+    for index, item in enumerate(reversed(history), start=1):
+        lines.append(f"{index}. {item.get('command', '').strip() or 'workflow'}")
+        for step in item.get("steps", []):
+            lines.append(f"   - {step}")
+        recommendation = item.get("recommendation")
+        if recommendation:
+            lines.append(f"   - Recommendation: {recommendation}")
+    return "\n".join(lines)
+
+
+def _workflow_history() -> list[dict[str, Any]]:
+    try:
+        from anvil.memory import store
+
+        result = store.recall(_WORKFLOW_HISTORY_KEY)
+    except Exception:
+        return []
+    if not result.get("success") or not result.get("found"):
+        return []
+    value = result.get("value")
+    if not isinstance(value, list):
+        return []
+    return [entry for entry in value if isinstance(entry, dict)]
+
+
+def _save_workflow_history(command: str, steps: list[str], recommendation: str) -> None:
+    try:
+        from anvil.memory import store
+
+        history = _workflow_history()
+        history.append({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "command": command.strip(),
+            "steps": steps,
+            "recommendation": recommendation,
+        })
+        store.remember(_WORKFLOW_HISTORY_KEY, history[-_WORKFLOW_HISTORY_LIMIT:])
+    except Exception:
+        return
+
+
+def _pending_workflow() -> dict[str, Any] | None:
+    try:
+        from anvil.memory import store
+
+        result = store.recall(_PENDING_WORKFLOW_KEY)
+    except Exception:
+        return None
+    if not result.get("success") or not result.get("found"):
+        return None
+    value = result.get("value")
+    if not isinstance(value, dict) or not value.get("active"):
+        return None
+    plan = value.get("plan")
+    if not isinstance(plan, Mapping):
+        return None
+    command = value.get("command")
+    if not isinstance(command, str):
+        return None
+    return {"command": command, "plan": dict(plan)}
+
+
+def _set_pending_workflow(command: str, plan: Mapping[str, Any]) -> None:
+    try:
+        from anvil.memory import store
+
+        store.remember(_PENDING_WORKFLOW_KEY, {
+            "active": True,
+            "command": command.strip(),
+            "plan": dict(plan),
+        })
+    except Exception:
+        return
+
+
+def _clear_pending_workflow() -> None:
+    try:
+        from anvil.memory import store
+
+        store.remember(_PENDING_WORKFLOW_KEY, {"active": False})
+    except Exception:
+        return
+
+
+def _requires_confirmation(plan: Mapping[str, Any]) -> bool:
+    for step in list(plan.get("steps", [])):
+        if str(step.get("tool", "")) in _CONFIRMATION_REQUIRED:
+            return True
+    return False
+
+
+def _pending_plan_prompt(plan: Mapping[str, Any]) -> str:
+    lines = ["Plan:"]
+    for index, step in enumerate(list(plan.get("steps", [])), start=1):
+        label = str(step.get("label", step.get("tool", "step")))
+        lines.append(f"{index}. {label}")
+    lines.append("Proceed? (y/n)")
+    return "\n".join(lines)
+
+
+def _favorite_stack_from_memory() -> str | None:
+    try:
+        from anvil.memory import store
+
+        result = store.search_memories("favorite framework", limit=10)
+    except Exception:
+        return None
+    if not result.get("success"):
+        return None
+    for match in result.get("matches", []):
+        value = str(match.get("value", "")).casefold()
+        if "next.js" in value or "nextjs" in value:
+            return "nextjs-drizzle"
+        if "fastapi" in value:
+            return "fastapi-ml"
+    return None
+
+
+def _extract_repo_name(command: str) -> str | None:
+    match = re.search(r"\brepo called\s+([A-Za-z0-9._-]+)\b", command, flags=re.IGNORECASE)
+    if match:
+        return match.group(1)
+    return None
+
+
+def _plan_workflow(command: str) -> dict[str, Any] | None:
+    text = command.strip()
+    lowered = text.casefold()
+    steps: list[dict[str, Any]] = []
+
+    if "safe to commit" in lowered and ("repo" in lowered or "repository" in lowered):
+        steps = [
+            {"tool": "git_status", "arguments": {}, "label": "Checked git status"},
+            {"tool": "run_tests", "arguments": {}, "label": "Ran tests"},
+        ]
+        return {"kind": "safety_check", "steps": steps}
+
+    if "run tests" in lowered and ("explain failures" in lowered or "explain failure" in lowered):
+        steps = [
+            {"tool": "run_tests", "arguments": {}, "label": "Ran tests"},
+            {"tool": "explain_error", "arguments": {}, "label": "Explained test failures", "when": "tests_failed"},
+        ]
+        return {"kind": "test_and_explain", "steps": steps}
+
+    has_status = "git status" in lowered
+    has_tests = "run tests" in lowered
+    if has_status and has_tests:
+        status_index = lowered.find("git status")
+        tests_index = lowered.find("run tests")
+        ordered = [
+            ("git_status", "Checked git status"),
+            ("run_tests", "Ran tests"),
+        ]
+        if tests_index < status_index:
+            ordered.reverse()
+        steps = [{"tool": tool, "arguments": {}, "label": label} for tool, label in ordered]
+        return {"kind": "status_and_tests", "steps": steps}
+
+    if "create a repo" in lowered and "favorite framework" in lowered:
+        name = _extract_repo_name(text)
+        stack = _favorite_stack_from_memory()
+        if name and stack:
+            private = "public" not in lowered
+            steps = [{
+                "tool": "create_repo",
+                "arguments": {"name": name, "stack": stack, "private": private},
+                "label": f"Created repository {name}",
+            }]
+            return {"kind": "create_repo_from_memory", "steps": steps}
+
+    if "commit all current changes" in lowered or lowered.startswith("commit all"):
+        steps = [{
+            "tool": "git_commit",
+            "arguments": {"repo_path": os.getcwd(), "message": "Commit current changes"},
+            "label": "Committed current changes",
+        }]
+        return {"kind": "commit_current_changes", "steps": steps}
+    return None
+
+
+def _tests_failure_text(result: Mapping[str, Any]) -> str:
+    parts = [
+        str(result.get("stdout", "")).strip(),
+        str(result.get("stderr", "")).strip(),
+        str(result.get("error", "")).strip(),
+    ]
+    return "\n".join(part for part in parts if part).strip()
+
+
+def _run_workflow(
+    command: str,
+    plan: Mapping[str, Any],
+    handlers: Mapping[str, Callable[..., Any]] | None,
+    confirm: Callable[[str], bool] | None,
+    *,
+    skip_confirmation: bool = False,
+) -> str:
+    steps = list(plan.get("steps", []))
+    _emit_debug("workflow_plan", command=command, steps=steps)
+    completed_lines: list[str] = []
+    history_lines: list[str] = []
+    failures: list[str] = []
+    context: dict[str, Any] = {}
+
+    for index, step in enumerate(steps, start=1):
+        tool = str(step.get("tool", ""))
+        label = str(step.get("label", tool))
+        arguments = dict(step.get("arguments", {}))
+        when = step.get("when")
+
+        if when == "tests_failed":
+            test_result = context.get("run_tests")
+            if not isinstance(test_result, Mapping) or bool(test_result.get("success")):
+                completed_lines.append(f"- Step {index}: {label}")
+                history_lines.append(label + " (skipped)")
+                _emit_debug("workflow_step_complete", step=index, tool=tool, skipped=True)
+                continue
+            failure_text = _tests_failure_text(test_result)
+            if not failure_text:
+                completed_lines.append(f"- Step {index}: {label}")
+                history_lines.append(label + " (skipped)")
+                _emit_debug("workflow_step_complete", step=index, tool=tool, skipped=True)
+                continue
+            arguments["error_text"] = failure_text
+
+        if tool in {"git_status", "run_tests"}:
+            _normalize_repo_path(arguments)
+
+        if tool not in _TOOL_MODULES:
+            completed_lines.append(f"✗ Step {index}: {label}")
+            history_lines.append(label + " (rejected)")
+            failures.append(f"{label}: Unregistered tool requested: {tool}")
+            _emit_debug("workflow_step_complete", step=index, tool=tool, success=False, rejected=True)
+            continue
+
+        _emit_debug("workflow_step_start", step=index, tool=tool, arguments=arguments)
+        if not skip_confirmation and not _confirm_tool(tool, arguments, confirm):
+            completed_lines.append(f"✗ Step {index}: {label}")
+            history_lines.append(label + " (cancelled)")
+            failures.append(f"{label}: Action cancelled by the user.")
+            _emit_debug("workflow_step_complete", step=index, tool=tool, success=False, cancelled=True)
+            continue
+
+        function = _handler(tool, handlers)
+        if function is None:
+            result: Any = {"success": False, "error": f"tool '{tool}' is not available"}
+        else:
+            try:
+                result = function(**arguments)
+            except Exception as exc:
+                result = {"success": False, "error": str(exc)}
+        context[tool] = result
+
+        success = bool(isinstance(result, Mapping) and result.get("success"))
+        if success:
+            completed_lines.append(f"✓ Step {index}: {label}")
+            history_lines.append(label)
+        else:
+            completed_lines.append(f"✗ Step {index}: {label}")
+            history_lines.append(label + " (failed)")
+            if isinstance(result, Mapping):
+                reason = result.get("error") or result.get("stderr") or result.get("stdout")
+                if reason:
+                    failures.append(f"{label}: {str(reason).strip()}")
+        _emit_debug("workflow_step_complete", step=index, tool=tool, success=success, result=result)
+
+    recommendation = "Workflow completed."
+    if plan.get("kind") == "safety_check":
+        status_ok = bool(isinstance(context.get("git_status"), Mapping) and context["git_status"].get("success"))
+        tests_ok = bool(isinstance(context.get("run_tests"), Mapping) and context["run_tests"].get("success"))
+        if status_ok and tests_ok:
+            recommendation = "Repository looks safe to commit."
+        else:
+            recommendation = "Repository is not safe to commit yet."
+    elif failures:
+        recommendation = "Review and fix failed steps before proceeding."
+
+    lines = ["Completed:", *completed_lines, f"Final recommendation: {recommendation}"]
+    if failures:
+        lines.append("Reasons:")
+        lines.extend(f"- {reason}" for reason in failures)
+    summary = "\n".join(lines)
+    _emit_debug("workflow_summary", summary=summary)
+    _save_workflow_history(command, history_lines, recommendation)
+    return summary
+
+
 def run(
     command: str,
     *,
@@ -383,6 +694,34 @@ def run(
     local_result = _memory_command(command)
     if local_result is not None:
         return local_result
+
+    pending = _pending_workflow()
+    if pending is not None:
+        response = command.strip().casefold()
+        if response in {"y", "yes"}:
+            _clear_pending_workflow()
+            return _run_workflow(
+                pending["command"],
+                pending["plan"],
+                handlers,
+                confirm,
+                skip_confirmation=True,
+            )
+        if response in {"n", "no"}:
+            _clear_pending_workflow()
+            return "Cancelled pending workflow."
+        return "A workflow is waiting for confirmation. Reply with y to proceed or n to cancel."
+
+    workflow_history = _workflow_history_command(command)
+    if workflow_history is not None:
+        return workflow_history
+
+    plan = _plan_workflow(command)
+    if plan is not None:
+        if _requires_confirmation(plan):
+            _set_pending_workflow(command, plan)
+            return _pending_plan_prompt(plan)
+        return _run_workflow(command, plan, handlers, confirm)
 
     inline_error = _extract_inline_explain_error(command)
     if inline_error:
@@ -438,9 +777,7 @@ def run(
         try:
             arguments = _tool_arguments(call)
             if name in {"git_status", "run_tests"}:
-                path = arguments.get("repo_path")
-                if not path or path in {"current_repo", "./current_repo"}:
-                    arguments["repo_path"] = os.getcwd()
+                _normalize_repo_path(arguments)
             if not _confirm_tool(name, arguments, confirm):
                 result = {"success": False, "cancelled": True, "tool": name, "message": "Action cancelled by the user."}
             else:

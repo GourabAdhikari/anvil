@@ -105,3 +105,82 @@ def test_multiline_explain_error_routes_to_tool():
     payload = json.loads(result)
     assert calls == [{"error_text": "ModuleNotFoundError: No module named 'pip'"}]
     assert payload["success"] is True
+
+
+def test_workflow_runs_multiple_tools_in_sequence():
+    calls = []
+
+    def run_tests(**args):
+        calls.append(("run_tests", args))
+        return {"success": True, "passed": True}
+
+    def git_status(**args):
+        calls.append(("git_status", args))
+        return {"success": True, "is_dirty": False}
+
+    result = router.run(
+        "show git status and run tests",
+        handlers={"run_tests": run_tests, "git_status": git_status},
+    )
+
+    assert [name for name, _ in calls] == ["git_status", "run_tests"]
+    assert "✓ Step 1" in result
+    assert "✓ Step 2" in result
+
+
+def test_workflow_failure_recovery_for_safety_check():
+    calls = []
+
+    def git_status(**args):
+        calls.append(("git_status", args))
+        return {"success": True, "is_dirty": True}
+
+    def run_tests(**args):
+        calls.append(("run_tests", args))
+        return {"success": False, "error": "pytest not installed"}
+
+    result = router.run(
+        "check my repository and tell me if it is safe to commit",
+        handlers={"git_status": git_status, "run_tests": run_tests},
+    )
+
+    assert [name for name, _ in calls] == ["git_status", "run_tests"]
+    assert "Repository is not safe to commit yet." in result
+    assert "pytest not installed" in result
+
+
+def test_workflow_runs_explain_error_only_when_tests_fail():
+    calls = []
+
+    def run_tests(**args):
+        calls.append(("run_tests", args))
+        return {"success": False, "stdout": "", "stderr": "AssertionError: bad output"}
+
+    def explain_error(**args):
+        calls.append(("explain_error", args))
+        return {"success": True, "error_summary": "A test assertion failed."}
+
+    result = router.run(
+        "run tests then explain failures",
+        handlers={"run_tests": run_tests, "explain_error": explain_error},
+    )
+
+    assert [name for name, _ in calls] == ["run_tests", "explain_error"]
+    assert "AssertionError: bad output" in calls[1][1]["error_text"]
+    assert "✓ Step 2: Explained test failures" in result
+
+
+def test_workflow_skips_explain_error_when_tests_pass():
+    calls = []
+
+    def run_tests(**args):
+        calls.append(("run_tests", args))
+        return {"success": True, "passed": True}
+
+    result = router.run(
+        "run tests then explain failures",
+        handlers={"run_tests": run_tests},
+    )
+
+    assert [name for name, _ in calls] == ["run_tests"]
+    assert "Step 2: Explained test failures" in result

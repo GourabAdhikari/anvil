@@ -9,6 +9,7 @@ and persistent local memory.
 
 - Text CLI: `anvil run "<command>"`
 - Groq function-calling router
+- Autonomous multi-step workflow planning and sequential tool execution
 - GitHub repository creation with an empty README
 - Git status and commits through GitPython
 - Automatic pytest or npm test execution
@@ -17,8 +18,8 @@ and persistent local memory.
 - Tree-sitter code chunking and CPU-only Jina code embeddings
 - ChromaDB-backed key/value memory
 
-Templates and router memory integration are not implemented in the current
-build. Voice, direct chat, and text-command interfaces are available.
+Templates are not implemented in the current build. Voice, direct chat, and
+text-command interfaces are available.
 
 ### Software wake word
 
@@ -108,6 +109,11 @@ python -m anvil.cli.main run "run tests in /path/to/repository"
 python -m anvil.cli.main run "list open pull requests for octocat/hello-world"
 python -m anvil.cli.main run "explain this error: ModuleNotFoundError: No module named requests"
 python -m anvil.cli.main run "find duplicate code in /path/to/repo-a and /path/to/repo-b"
+python -m anvil.cli.main run "show git status and run tests"
+python -m anvil.cli.main run "check my repository and tell me if it is safe to commit"
+python -m anvil.cli.main run "run tests then explain failures"
+python -m anvil.cli.main run "create a repo called workflow-test using my favorite framework"
+python -m anvil.cli.main run "workflow history"
 python -m anvil.cli.main chat
 ANVIL_DEBUG=1 python -m anvil.cli.main chat
 python -m anvil.cli.main chat --tts
@@ -152,6 +158,22 @@ local synthesis and playback without calling the LLM or STT.
 The `run` command requires a configured `GROQ_API_KEY`. The router selects and
 executes tools based on the natural-language command. Tool failures are returned
 to Groq so the final response can explain them.
+
+### Workflow mode
+
+For multi-step requests, Anvil now plans and executes a workflow before
+returning a result. Example plans include:
+
+- `show git status and run tests` → `git_status` then `run_tests`
+- `run tests then explain failures` → `run_tests`, then `explain_error` only on failures
+- `check my repository and tell me if it is safe to commit` → `git_status` + `run_tests` + recommendation
+
+Destructive actions (`create_repo`, `git_commit`) require explicit confirmation.
+`workflow history` returns recent workflow summaries from persistent memory.
+
+With `ANVIL_DEBUG=1`, workflow planning and execution emits:
+`workflow_plan`, `workflow_step_start`, `workflow_step_complete`,
+and `workflow_summary`.
 
 ### Direct tool usage
 

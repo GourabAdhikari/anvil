@@ -75,6 +75,7 @@ def _health_check() -> dict[str, Any]:
 def _print_help() -> None:
     typer.echo("Commands: help, clear, exit")
     typer.echo("Memory: memory list, memory remember <text>, memory search <query>, memory clear, memory stats")
+    typer.echo("Workflow: workflow history")
     typer.echo("Modes: chat, voice, health")
     typer.echo("Use chat mode to type commands or voice mode to press Enter and speak.")
 
