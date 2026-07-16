@@ -72,6 +72,10 @@ Create `.env` in the project root:
 
 Never commit `.env` or expose these tokens in source control.
 
+Set `ANVIL_DEBUG=1` to show Groq prompts, tool schemas, TTS cache events, and
+other internal diagnostics. By default, chat shows only user prompts, assistant
+responses, and errors.
+
 ### Groq startup validation
 
 The router fails clearly at startup when either requirement is missing:
@@ -101,8 +105,11 @@ python -m anvil.cli.main run "list open pull requests for octocat/hello-world"
 python -m anvil.cli.main run "explain this error: ModuleNotFoundError: No module named requests"
 python -m anvil.cli.main run "find duplicate code in /path/to/repo-a and /path/to/repo-b"
 python -m anvil.cli.main chat
+ANVIL_DEBUG=1 python -m anvil.cli.main chat
 python -m anvil.cli.main chat --tts
 python -m anvil.cli.main voice
+python -m anvil.cli.main memory
+python -m anvil.cli.main tts-test
 ```
 
 ### Chat mode
@@ -119,10 +126,17 @@ Chat commands:
 - `clear` — clear the terminal
 - `exit` — leave chat or voice mode
 
-Chat and voice commands use the same router, tool dispatch, and existing memory
-module. `chat --tts` additionally synthesizes and attempts to play each response.
-Voice mode has no wake-word dependency: press Enter, speak a command, and Anvil
-records, transcribes, routes, and speaks the response.
+Chat and voice commands use the same router, tool dispatch, and ChromaDB memory
+backend. The `memory` command prints the local memory collection for debugging.
+`chat --tts` additionally synthesizes and attempts to play each response. Voice
+mode has no wake-word dependency: press Enter, speak a command, and Anvil records,
+transcribes, routes, and speaks the response.
+
+Voice events include `recording_started`, `recording_finished`, `transcribing`,
+`no_speech_detected`, `generating_response`, `speaking`, and `response_spoken`.
+TTS strips Markdown formatting, links, and code fences before synthesis and
+caches the Coqui model for reuse within the process. Run `tts-test` to validate
+local synthesis and playback without calling the LLM or STT.
 
 The `run` command requires a configured `GROQ_API_KEY`. The router selects and
 executes tools based on the natural-language command. Tool failures are returned

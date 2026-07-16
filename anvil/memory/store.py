@@ -81,6 +81,17 @@ class MemoryStore:
         value = _decode(documents[0])
         return {"success": True, "key": key.strip(), "found": True, "value": value}
 
+    def debug_state(self) -> dict[str, Any]:
+        """Return stored keys and decoded values for local diagnostics."""
+        try:
+            result = self._get_collection().get(include=["documents"])
+            ids = result.get("ids") or []
+            documents = result.get("documents") or []
+            values = {key: _decode(document) for key, document in zip(ids, documents)}
+            return {"success": True, "collection": self._collection_name, "count": len(values), "values": values}
+        except Exception as exc:
+            return {"success": False, "collection": self._collection_name, "error": str(exc)}
+
 
 _default_store: MemoryStore | None = None
 
@@ -102,4 +113,9 @@ def recall(key: str) -> dict[str, Any]:
     return _store().recall(key)
 
 
-__all__ = ["MemoryStore", "remember", "recall"]
+def debug_state() -> dict[str, Any]:
+    """Inspect the default memory collection for diagnostics."""
+    return _store().debug_state()
+
+
+__all__ = ["MemoryStore", "remember", "recall", "debug_state"]

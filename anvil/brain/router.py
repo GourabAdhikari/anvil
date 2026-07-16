@@ -246,8 +246,9 @@ def run(command: str, *, client: Any = None, handlers: Mapping[str, Callable[...
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": command.strip()},
     ]
-    print("Groq system prompt:", repr(SYSTEM_PROMPT))
-    print("Groq tools:", json.dumps(tools, sort_keys=True))
+    if os.getenv("ANVIL_DEBUG") == "1":
+        print("Groq system prompt:", repr(SYSTEM_PROMPT))
+        print("Groq tools:", json.dumps(tools, sort_keys=True))
     response = client.chat.completions.create(model=MODEL, messages=messages, tools=tools, tool_choice="auto")
     message = _value(_value(response, "choices", [])[0], "message", {})
     calls = _tool_calls(message)
