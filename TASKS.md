@@ -6,4 +6,4 @@
 
 ## Current Task
 
-Build tools/devops/error_explainer.py (complete)
+Build tools/devops/duplicate_detector.py (complete)

@@ -1,0 +1,26 @@
+Duplicate Detector Architecture
+
+1. File Discovery
+- Recursively scans repositories
+- Supports .py, .js, .jsx, .ts, .tsx
+- Skips .git, node_modules, venv, cache folders
+
+2. Tree-sitter Parsing
+- Parses source files
+- Extracts functions and classes
+- Stores symbol name, file path and source text
+
+3. Embedding Generation
+- Uses jinaai/jina-embeddings-v2-base-code
+- CPU-only inference
+- Generates embeddings for each code chunk
+
+4. Similarity Comparison
+- Pairwise cosine similarity
+- Compares chunks across repositories
+- Returns matches above threshold
+
+5. Output
+- Structured JSON result
+- Match metadata
+- Error handling for invalid paths and dependencies
