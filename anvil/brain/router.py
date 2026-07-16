@@ -10,6 +10,7 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import shlex
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -229,6 +230,48 @@ def _handler(name: str, handlers: Mapping[str, Callable[..., Any]] | None) -> Ca
     return getattr(module, name, None)
 
 
+def _memory_command(command: str) -> str | None:
+    """Handle memory commands locally without involving the LLM."""
+    try:
+        parts = shlex.split(command.strip())
+    except ValueError as exc:
+        return json.dumps({"success": False, "error": f"Invalid memory command: {exc}"})
+    if len(parts) < 2 or parts[0].casefold() != "memory":
+        return None
+
+    from anvil.memory import store
+
+    action = parts[1].casefold()
+    if action == "remember" and len(parts) >= 3:
+        return json.dumps(store.remember_statement(" ".join(parts[2:])), default=str)
+    if action == "list" and len(parts) == 2:
+        return json.dumps(store.list_memories(), default=str)
+    if action == "search" and len(parts) >= 3:
+        return json.dumps(store.search_memories(" ".join(parts[2:])), default=str)
+    if action == "clear" and len(parts) == 2:
+        return json.dumps(store.clear_memories(), default=str)
+    return json.dumps({
+        "success": False,
+        "error": "Usage: memory remember <statement> | memory list | memory search <query> | memory clear",
+    })
+
+
+def _memory_context(command: str) -> str:
+    try:
+        from anvil.memory import store
+
+        result = store.search_memories(command, limit=5)
+        if not result.get("success") or not result.get("matches"):
+            return ""
+        memories = [str(match.get("value", "")).strip() for match in result["matches"]]
+        memories = [memory for memory in memories if memory]
+        if not memories:
+            return ""
+        return "\nRelevant stored memories:\n" + "\n".join(f"- {memory}" for memory in memories)
+    except Exception:
+        return ""
+
+
 def run(command: str, *, client: Any = None, handlers: Mapping[str, Callable[..., Any]] | None = None) -> str:
     """Send ``command`` to Groq, execute requested tools, and return the reply.
 
@@ -239,11 +282,16 @@ def run(command: str, *, client: Any = None, handlers: Mapping[str, Callable[...
     if not isinstance(command, str) or not command.strip():
         raise ValueError("command must be a non-empty string")
 
+    local_result = _memory_command(command)
+    if local_result is not None:
+        return local_result
+
     client = client or _client()
     tools = _schemas()
     advertised_tools = _validate_tool_registry(tools)
+    system_prompt = SYSTEM_PROMPT + _memory_context(command)
     messages: list[dict[str, Any]] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": command.strip()},
     ]
     if os.getenv("ANVIL_DEBUG") == "1":

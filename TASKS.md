@@ -29,6 +29,17 @@
 - [x] Optimize voice speech responses using complete sentences
 - [x] Add TTS-only diagnostic command and playback validation
 
+## Phase 10 — Memory
+
+- [x] Persistent ChromaDB memory store
+- [x] Natural-language memory statements and search
+- [x] Memory list, clear, and search commands
+- [x] Restart persistence coverage
+- [x] Automated memory tests
+- [x] Router memory command interception
+- [x] Memory context injection before LLM responses
+- [x] End-to-end chat memory and restart validation
+
 ## Current Task
 
-Phase 9 complete
+Phase 10 complete

@@ -108,7 +108,10 @@ python -m anvil.cli.main chat
 ANVIL_DEBUG=1 python -m anvil.cli.main chat
 python -m anvil.cli.main chat --tts
 python -m anvil.cli.main voice
-python -m anvil.cli.main memory
+python -m anvil.cli.main memory list
+python -m anvil.cli.main memory remember "I prefer concise responses"
+python -m anvil.cli.main memory search "response style"
+python -m anvil.cli.main memory clear
 python -m anvil.cli.main tts-test
 ```
 
@@ -127,7 +130,9 @@ Chat commands:
 - `exit` — leave chat or voice mode
 
 Chat and voice commands use the same router, tool dispatch, and ChromaDB memory
-backend. The `memory` command prints the local memory collection for debugging.
+backend. Memory is persisted locally and survives process restarts. Use `memory
+list`, `memory remember`, `memory search`, and `memory clear` to inspect and
+manage it.
 `chat --tts` additionally synthesizes and attempts to play each response. Voice
 mode has no wake-word dependency: press Enter, speak a command, and Anvil records,
 transcribes, routes, and speaks the response.

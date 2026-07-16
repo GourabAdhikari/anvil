@@ -1,7 +1,8 @@
-"""Persistent ChromaDB-backed key/value memory for Anvil."""
+"""Persistent ChromaDB-backed memory for Anvil."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -61,7 +62,7 @@ class MemoryStore:
             return {"success": False, "error": validation_error}
         try:
             encoded = _encode(value)
-            self._get_collection().upsert(ids=[key.strip()], documents=[encoded])
+            self._get_collection().upsert(ids=[key.strip()], documents=[encoded], metadatas=[{"type": "key_value"}])
         except Exception as exc:
             return {"success": False, "key": key, "error": str(exc)}
         return {"success": True, "key": key.strip(), "value": value}
@@ -81,16 +82,78 @@ class MemoryStore:
         value = _decode(documents[0])
         return {"success": True, "key": key.strip(), "found": True, "value": value}
 
-    def debug_state(self) -> dict[str, Any]:
-        """Return stored keys and decoded values for local diagnostics."""
+    def remember_statement(self, statement: str) -> dict[str, Any]:
+        """Persist a natural-language statement for semantic retrieval."""
+        if not isinstance(statement, str) or not statement.strip():
+            return {"success": False, "error": "statement must be a non-empty string."}
+        text = statement.strip()
+        memory_id = "statement_" + hashlib.sha256(text.encode("utf-8")).hexdigest()
         try:
-            result = self._get_collection().get(include=["documents"])
+            self._get_collection().upsert(
+                ids=[memory_id],
+                documents=[text],
+                metadatas=[{"type": "statement"}],
+            )
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+        return {"success": True, "id": memory_id, "statement": text}
+
+    def list_memories(self) -> dict[str, Any]:
+        """List all persisted key/value and statement memories."""
+        try:
+            result = self._get_collection().get(include=["documents", "metadatas"])
             ids = result.get("ids") or []
             documents = result.get("documents") or []
-            values = {key: _decode(document) for key, document in zip(ids, documents)}
-            return {"success": True, "collection": self._collection_name, "count": len(values), "values": values}
+            metadatas = result.get("metadatas") or [{} for _ in ids]
+            memories = []
+            for memory_id, document, metadata in zip(ids, documents, metadatas):
+                kind = (metadata or {}).get("type", "key_value")
+                memories.append({"id": memory_id, "type": kind, "value": document if kind == "statement" else _decode(document)})
+            return {"success": True, "count": len(memories), "memories": memories}
         except Exception as exc:
-            return {"success": False, "collection": self._collection_name, "error": str(exc)}
+            return {"success": False, "error": str(exc)}
+
+    def search_memories(self, query: str, limit: int = 5) -> dict[str, Any]:
+        """Semantically search stored memories using ChromaDB embeddings."""
+        if not isinstance(query, str) or not query.strip():
+            return {"success": False, "error": "query must be a non-empty string."}
+        if limit <= 0:
+            return {"success": False, "error": "limit must be positive."}
+        try:
+            result = self._get_collection().query(
+                query_texts=[query.strip()],
+                n_results=limit,
+                include=["documents", "metadatas", "distances"],
+            )
+            documents = (result.get("documents") or [[]])[0]
+            metadatas = (result.get("metadatas") or [[]])[0]
+            distances = (result.get("distances") or [[]])[0]
+            ids = (result.get("ids") or [[]])[0]
+            matches = []
+            for memory_id, document, metadata, distance in zip(ids, documents, metadatas, distances):
+                kind = (metadata or {}).get("type", "key_value")
+                matches.append({"id": memory_id, "type": kind, "value": document if kind == "statement" else _decode(document), "distance": distance})
+            return {"success": True, "query": query.strip(), "matches": matches}
+        except Exception as exc:
+            return {"success": False, "query": query.strip(), "error": str(exc)}
+
+    def clear_memories(self) -> dict[str, Any]:
+        """Delete all memories from the collection."""
+        try:
+            collection = self._get_collection()
+            ids = collection.get().get("ids") or []
+            if ids:
+                collection.delete(ids=ids)
+            return {"success": True, "deleted": len(ids)}
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
+    def debug_state(self) -> dict[str, Any]:
+        """Return stored keys and decoded values for local diagnostics."""
+        state = self.list_memories()
+        if not state.get("success"):
+            return state
+        return {"success": True, "collection": self._collection_name, "count": state["count"], "values": state["memories"]}
 
 
 _default_store: MemoryStore | None = None
@@ -104,18 +167,40 @@ def _store() -> MemoryStore:
 
 
 def remember(key: str, value: Any) -> dict[str, Any]:
-    """Store a value using the default persistent memory store."""
     return _store().remember(key, value)
 
 
 def recall(key: str) -> dict[str, Any]:
-    """Retrieve a value using the default persistent memory store."""
     return _store().recall(key)
 
 
+def remember_statement(statement: str) -> dict[str, Any]:
+    return _store().remember_statement(statement)
+
+
+def list_memories() -> dict[str, Any]:
+    return _store().list_memories()
+
+
+def search_memories(query: str, limit: int = 5) -> dict[str, Any]:
+    return _store().search_memories(query, limit)
+
+
+def clear_memories() -> dict[str, Any]:
+    return _store().clear_memories()
+
+
 def debug_state() -> dict[str, Any]:
-    """Inspect the default memory collection for diagnostics."""
     return _store().debug_state()
 
 
-__all__ = ["MemoryStore", "remember", "recall", "debug_state"]
+__all__ = [
+    "MemoryStore",
+    "remember",
+    "recall",
+    "remember_statement",
+    "list_memories",
+    "search_memories",
+    "clear_memories",
+    "debug_state",
+]

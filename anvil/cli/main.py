@@ -194,11 +194,24 @@ def _speak_generated_response(
 
 
 @app.command("memory")
-def memory_command() -> None:
-    """Inspect the local ChromaDB memory state."""
+def memory_command(
+    action: str = typer.Argument("list", help="list, remember, search, or clear"),
+    value: str | None = typer.Argument(None, help="Statement to remember or search query"),
+) -> None:
+    """List, remember, search, or clear persistent local memories."""
     try:
-        from anvil.memory.store import debug_state
-        typer.echo(json.dumps(debug_state(), indent=2, default=str))
+        from anvil.memory.store import clear_memories, list_memories, remember_statement, search_memories
+        if action == "list":
+            result = list_memories()
+        elif action == "remember" and value:
+            result = remember_statement(value)
+        elif action == "search" and value:
+            result = search_memories(value)
+        elif action == "clear":
+            result = clear_memories()
+        else:
+            result = {"success": False, "error": "Usage: memory list | memory remember <statement> | memory search <query> | memory clear"}
+        typer.echo(json.dumps(result, indent=2, default=str))
     except Exception as exc:
         _log("error", error=str(exc))
 
