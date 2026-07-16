@@ -6,4 +6,4 @@
 
 ## Current Task
 
-Build tools/scaffold/create_repo.py (complete)
+Build tools/devops/git_ops.py (complete)
