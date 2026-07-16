@@ -40,6 +40,16 @@
 - [x] Memory context injection before LLM responses
 - [x] End-to-end chat memory and restart validation
 
+## Phase 11 — Agent Actions
+
+- [x] Natural-language tool selection and execution
+- [x] Natural tool-result responses
+- [x] Confirmation for repository creation and commits
+- [x] End-to-end action tests
+- [x] Tool registration diagnostics and complete tool list validation
+- [x] Executor registry validation and dispatch diagnostics
+- [x] Active-venv dependency bootstrap and tool validation
+
 ## Current Task
 
-Phase 10 complete
+Phase 11 complete

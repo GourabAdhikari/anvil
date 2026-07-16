@@ -50,6 +50,9 @@ python3.12 -m venv .venv
 source .venv/bin/activate        # Windows: .venv\\Scripts\\activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+
+# Single bootstrap command for an existing .venv:
+.venv/bin/python -m pip install -r requirements.txt
 # Or install the Groq dependency directly:
 python -m pip install groq
 

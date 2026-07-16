@@ -25,11 +25,15 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "git_status",
-            "description": "Get the current git status of a local repo.",
+            "description": "Get the current git status of a local repo. Defaults to the current working directory when repo_path is omitted.",
             "parameters": {
                 "type": "object",
-                "properties": {"repo_path": {"type": "string"}},
-                "required": ["repo_path"],
+                "properties": {
+                    "repo_path": {
+                        "type": "string",
+                        "description": "Optional local repository path; defaults to the current working directory.",
+                    }
+                },
             },
         },
     },

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import re
@@ -37,6 +38,25 @@ def _log(event: str, *, force: bool = False, **details: Any) -> None:
     if not force and event != "error" and os.getenv("ANVIL_DEBUG") != "1":
         return
     typer.echo(json.dumps({"event": event, **details}, default=str))
+
+
+_TOOL_DEPENDENCIES = {
+    "GitPython": "git",
+    "PyGithub": "github",
+    "groq": "groq",
+    "ChromaDB": "chromadb",
+    "tree-sitter": "tree_sitter",
+    "sentence-transformers": "sentence_transformers",
+    "numpy": "numpy",
+    "pytest": "pytest",
+}
+
+
+def _validate_tool_dependencies() -> list[str]:
+    missing = [package for package, module in _TOOL_DEPENDENCIES.items() if importlib.util.find_spec(module) is None]
+    if missing:
+        _log("dependencies_missing", force=True, packages=missing)
+    return missing
 
 
 def _print_help() -> None:
@@ -267,6 +287,7 @@ def chat_command(
             tts.initialize()
         except Exception as exc:
             _log("error", error=str(exc))
+    _validate_tool_dependencies()
     typer.echo("Anvil chat. Type help for commands.")
     while True:
         try:

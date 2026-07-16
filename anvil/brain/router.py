@@ -22,7 +22,8 @@ MODEL = "llama-3.3-70b-versatile"
 SYSTEM_PROMPT = (
     "You are Anvil, a concise personal developer agent. "
     "Only call functions that appear in the supplied tools list. "
-    "If no supplied tool applies, answer the user directly."
+    "If no supplied tool applies, answer the user directly. "
+    "For git_status, omit repo_path to inspect the current working directory; never invent placeholder paths."
 )
 
 # Kept here as a fallback while the schemas module is being built.  If that
@@ -48,8 +49,11 @@ _DEFAULT_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "git_status",
-            "description": "Get the current git status of a local repository.",
-            "parameters": {"type": "object", "properties": {"repo_path": {"type": "string"}}, "required": ["repo_path"]},
+            "description": "Get the current git status of a local repository. Defaults to the current working directory when repo_path is omitted.",
+            "parameters": {
+                "type": "object",
+                "properties": {"repo_path": {"type": "string", "description": "Optional; defaults to the current working directory."}},
+            },
         },
     },
     {
@@ -105,6 +109,17 @@ _DEFAULT_TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
 ]
 
+_CONFIRMATION_REQUIRED = frozenset({"create_repo", "git_commit"})
+_REQUIRED_TOOLS = frozenset({
+    "create_repo",
+    "git_status",
+    "git_commit",
+    "run_tests",
+    "check_prs",
+    "explain_error",
+    "find_duplicates",
+})
+
 _TOOL_MODULES = {
     "create_repo": "anvil.tools.scaffold.create_repo",
     "git_status": "anvil.tools.devops.git_ops",
@@ -146,12 +161,18 @@ def _validate_tool_registry(tools: list[dict[str, Any]]) -> set[str]:
     registered = set(_TOOL_MODULES)
     missing_handlers = advertised - registered
     missing_schemas = registered - advertised
-    if missing_handlers or missing_schemas:
+    missing_required = _REQUIRED_TOOLS - advertised
+    unexpected_tools = advertised - _REQUIRED_TOOLS
+    if missing_handlers or missing_schemas or missing_required or unexpected_tools:
         details = []
         if missing_handlers:
             details.append(f"advertised without handlers: {sorted(missing_handlers)}")
         if missing_schemas:
             details.append(f"registered without schemas: {sorted(missing_schemas)}")
+        if missing_required:
+            details.append(f"required tools missing from schemas: {sorted(missing_required)}")
+        if unexpected_tools:
+            details.append(f"unexpected tools in schemas: {sorted(unexpected_tools)}")
         raise RuntimeError("Tool registry mismatch: " + "; ".join(details))
     return advertised
 
@@ -208,6 +229,15 @@ def _tool_arguments(call: Any) -> dict[str, Any]:
     return raw
 
 
+def _raw_payload(value: Any) -> str:
+    if isinstance(value, Mapping):
+        return json.dumps(value, default=str, sort_keys=True)
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        return json.dumps(model_dump(), default=str, sort_keys=True)
+    return repr(value)
+
+
 def _tool_result(value: Any) -> str:
     if isinstance(value, str):
         return value
@@ -217,17 +247,44 @@ def _tool_result(value: Any) -> str:
         return str(value)
 
 
+def _validate_executor_registry(handlers: Mapping[str, Callable[..., Any]] | None) -> None:
+    """Validate that every registered tool resolves to an executable function."""
+    missing: list[str] = []
+    for name, module_name in _TOOL_MODULES.items():
+        if handlers and name in handlers:
+            continue
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError as exc:
+            raise RuntimeError(f"Executor dependency for '{name}' is unavailable: {exc}") from exc
+        if not callable(getattr(module, name, None)):
+            missing.append(name)
+    if missing:
+        raise RuntimeError(f"Executor functions missing: {sorted(missing)}")
+
+
 def _handler(name: str, handlers: Mapping[str, Callable[..., Any]] | None) -> Callable[..., Any] | None:
+    print("Requested tool:", name)
+    print("Execution registry keys:", sorted(_TOOL_MODULES))
     if handlers and name in handlers:
         return handlers[name]
     module_name = _TOOL_MODULES.get(name)
     if not module_name:
         return None
-    try:
-        module = importlib.import_module(module_name)
-    except ImportError:
-        return None
+    module = importlib.import_module(module_name)
     return getattr(module, name, None)
+
+
+def _confirm_tool(name: str, arguments: dict[str, Any], confirm: Callable[[str], bool] | None) -> bool:
+    if name not in _CONFIRMATION_REQUIRED:
+        return True
+    prompt = f"Confirm {name} with arguments {json.dumps(arguments, default=str)}? [y/N] "
+    if confirm is not None:
+        return bool(confirm(prompt))
+    try:
+        return input(prompt).strip().casefold() in {"y", "yes"}
+    except (EOFError, KeyboardInterrupt):
+        return False
 
 
 def _memory_command(command: str) -> str | None:
@@ -263,8 +320,18 @@ def _memory_context(command: str) -> str:
         result = store.search_memories(command, limit=5)
         if not result.get("success") or not result.get("matches"):
             return ""
-        memories = [str(match.get("value", "")).strip() for match in result["matches"]]
-        memories = [memory for memory in memories if memory]
+        memories = []
+        for match in result["matches"]:
+            # Conversation transcripts can contain stale model errors and must
+            # never be treated as authoritative instructions or tool context.
+            if match.get("id") == "conversation_history":
+                continue
+            value = match.get("value", "")
+            if isinstance(value, (dict, list)):
+                continue
+            memory = str(value).strip()
+            if memory:
+                memories.append(memory)
         if not memories:
             return ""
         return "\nRelevant stored memories:\n" + "\n".join(f"- {memory}" for memory in memories)
@@ -272,7 +339,13 @@ def _memory_context(command: str) -> str:
         return ""
 
 
-def run(command: str, *, client: Any = None, handlers: Mapping[str, Callable[..., Any]] | None = None) -> str:
+def run(
+    command: str,
+    *,
+    client: Any = None,
+    handlers: Mapping[str, Callable[..., Any]] | None = None,
+    confirm: Callable[[str], bool] | None = None,
+) -> str:
     """Send ``command`` to Groq, execute requested tools, and return the reply.
 
     ``client`` and ``handlers`` are injectable for tests and local integrations.
@@ -289,15 +362,24 @@ def run(command: str, *, client: Any = None, handlers: Mapping[str, Callable[...
     client = client or _client()
     tools = _schemas()
     advertised_tools = _validate_tool_registry(tools)
+    _validate_executor_registry(handlers)
     system_prompt = SYSTEM_PROMPT + _memory_context(command)
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": command.strip()},
     ]
+    request_payload = {
+        "model": MODEL,
+        "messages": messages,
+        "tools": tools,
+        "tool_choice": "auto",
+    }
+    print(json.dumps({"event": "available_tools", "tools": sorted(advertised_tools)}))
+    print("Groq raw request #1:", _raw_payload(request_payload))
     if os.getenv("ANVIL_DEBUG") == "1":
-        print("Groq system prompt:", repr(SYSTEM_PROMPT))
-        print("Groq tools:", json.dumps(tools, sort_keys=True))
-    response = client.chat.completions.create(model=MODEL, messages=messages, tools=tools, tool_choice="auto")
+        print("Groq system prompt:", repr(system_prompt))
+    response = client.chat.completions.create(**request_payload)
+    print("Groq raw response #1:", _raw_payload(response))
     message = _value(_value(response, "choices", [])[0], "message", {})
     calls = _tool_calls(message)
     if not calls:
@@ -320,15 +402,26 @@ def run(command: str, *, client: Any = None, handlers: Mapping[str, Callable[...
     for call in calls:
         name = _tool_name(call)
         try:
-            function = _handler(name, handlers)
-            if function is None:
-                raise RuntimeError(f"tool '{name}' is not available")
-            result = function(**_tool_arguments(call))
+            arguments = _tool_arguments(call)
+            if name == "git_status":
+                path = arguments.get("repo_path")
+                if not path or path in {"current_repo", "./current_repo"}:
+                    arguments["repo_path"] = os.getcwd()
+            if not _confirm_tool(name, arguments, confirm):
+                result = {"success": False, "cancelled": True, "tool": name, "message": "Action cancelled by the user."}
+            else:
+                function = _handler(name, handlers)
+                if function is None:
+                    raise RuntimeError(f"tool '{name}' is not available")
+                result = function(**arguments)
         except Exception as exc:  # tool errors should be explained by the model
             result = {"error": str(exc)}
         messages.append({"role": "tool", "tool_call_id": _value(call, "id", name), "name": name, "content": _tool_result(result)})
 
-    final = client.chat.completions.create(model=MODEL, messages=messages)
+    final_payload = {"model": MODEL, "messages": messages}
+    print("Groq raw request #2:", _raw_payload(final_payload))
+    final = client.chat.completions.create(**final_payload)
+    print("Groq raw response #2:", _raw_payload(final))
     final_message = _value(_value(final, "choices", [])[0], "message", {})
     return _value(final_message, "content", "") or ""
 

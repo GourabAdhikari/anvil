@@ -3,7 +3,7 @@ groq  # Groq Python SDK
 python-dotenv
 typer
 PyGithub
-GitPython
+GitPython  # required by git_status and git_commit
 pytest
 chromadb
 numpy
