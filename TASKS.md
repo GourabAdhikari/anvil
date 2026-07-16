@@ -6,4 +6,4 @@
 
 ## Current Task
 
-Build voice/stt.py (complete)
+Build voice/tts.py (complete)
