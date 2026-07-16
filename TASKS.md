@@ -3,7 +3,7 @@ x# Current Tasks
 ## Phase 1
 
 - [ ] Setup project structure
-- [ ] Router
+- [x] Router
 - [ ] Tool schemas
 - [ ] CLI
 - [ ] GitHub integration
@@ -11,4 +11,4 @@ x# Current Tasks
 
 ## Current Task
 
-Build router.py
+Build router.py (complete)
