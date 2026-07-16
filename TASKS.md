@@ -6,4 +6,4 @@
 
 ## Current Task
 
-Build tools/devops/duplicate_detector.py (complete)
+Build memory/store.py (complete)
