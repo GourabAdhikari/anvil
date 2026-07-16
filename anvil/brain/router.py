@@ -13,6 +13,10 @@ import os
 from collections.abc import Callable, Mapping
 from typing import Any
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 MODEL = "llama-3.3-70b-versatile"
 
 # Kept here as a fallback while the schemas module is being built.  If that
